@@ -87,6 +87,9 @@ fi
 
 echo "Installing Tetragon in cluster..." 1>&2
 helm upgrade --install tetragon "$HELM_CHART" \
+  --set tetragon.debug=true \
+  --set tetragon.prometheus.serviceMonitor.enabled=true \
+  --set tetragonOperator.prometheus.serviceMonitor.enabled=true \
   -n "$NAMESPACE" \
   -f "$BASE_VALUES" "${extra_opts[@]}"
 
