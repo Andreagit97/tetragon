@@ -59,6 +59,10 @@ PROCESS += bpf_generic_kprobe_v53.o bpf_generic_retkprobe_v53.o \
 	   bpf_generic_rawtp_v53.o \
 	   bpf_generic_usdt_v53.o
 
+# v5.7
+# enforcer skeleton
+PROCESS += bpf_enforcer_skeleton.o
+
 # v5.11
 # base sensor
 PROCESS += bpf_execve_event_v511.o bpf_exit_v511.o bpf_fork_v511.o

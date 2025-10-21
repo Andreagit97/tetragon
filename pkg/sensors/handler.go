@@ -11,6 +11,7 @@ import (
 	"github.com/cilium/tetragon/api/v1/tetragon"
 	slimv1 "github.com/cilium/tetragon/pkg/k8s/slim/k8s/apis/meta/v1"
 	"github.com/cilium/tetragon/pkg/policyfilter"
+	"github.com/cilium/tetragon/pkg/sensors/tracing"
 	"github.com/cilium/tetragon/pkg/tracingpolicy"
 )
 
@@ -108,7 +109,27 @@ func (h *handler) updatePolicyFilter(tp tracingpolicy.TracingPolicy, tpID uint64
 	return filterID, nil
 }
 
+func (h *handler) addForEachWorkloadPolicy(op *tracingPolicyAdd) error {
+	// 1. obtain sensors
+	sensors, err := tracing.PolicyHandlerEnforcer(op.tp)
+	// 2. load them
+}
+
+func (h *handler) addForEachWorkloadValue(op *tracingPolicyAdd) error {
+
+}
+
 func (h *handler) addTracingPolicy(op *tracingPolicyAdd) error {
+	// At the moment we don't add them to the collection
+	// todo!: we need to handle loading/unloading
+	if op.tp.TpSpec().IsForEachWorkloadSkeleton() {
+		return h.addForEachWorkloadPolicy(op)
+	}
+
+	if op.tp.TpSpec().IsForEachWorkloadValues() {
+		return h.addForEachWorkloadValue(op)
+	}
+
 	h.collections.mu.Lock()
 	defer h.collections.mu.Unlock()
 	collections := h.collections.c

@@ -85,6 +85,13 @@ func (gtp *GenericTracingPolicyNamespaced) GetObjectMetaStruct() *metav1.ObjectM
 	return &gtp.Metadata
 }
 
+// ForEachWorkloadValues represents a tracing policy that applies to each workload.
+type ForEachWorkloadValues struct {
+	metav1.TypeMeta
+	Metadata metav1.ObjectMeta          `json:"metadata"`
+	Spec     v1alpha1.TracingPolicySpec `json:"spec"`
+}
+
 // FromYAML inspects the YAML input to determine the kind, then dispatches to
 // the generic FromYAML function.
 func FromYAML(data string) (TracingPolicy, error) {

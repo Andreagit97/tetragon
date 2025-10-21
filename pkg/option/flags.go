@@ -83,6 +83,7 @@ const (
 
 	KeyDisableKprobeMulti = "disable-kprobe-multi"
 	KeyDisableUprobeMulti = "disable-uprobe-multi"
+	KeyForEachWorkload    = "for-each-workload"
 
 	KeyUsePerfRingBuffer = "use-perf-ring-buffer"
 	KeyRBSize            = "rb-size"

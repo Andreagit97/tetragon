@@ -151,6 +151,7 @@ struct selector_arg_filter {
 	__u32 vallen;
 	__u32 type;
 	__u8 value;
+	__u8 for_each_cgroup;
 } __attribute__((packed));
 
 struct selector_arg_filters {
@@ -722,11 +723,15 @@ filter_char_buf_equal(struct selector_arg_filter *filter, char *arg_str, uint or
 
 	// Check if we have entries for this padded length.
 	// Do this before we copy data for efficiency.
-	index = string_map_index(padded_len);
-	map_idx = map_ids[index & 0xf];
-	if (map_idx == 0xffffffff)
-		return 0;
 
+	if(multivalue_enabled()) {
+
+	} else {
+		index = string_map_index(padded_len);
+		map_idx = map_ids[index & 0xf];
+		if (map_idx == 0xffffffff)
+			return 0;
+	}
 	heap = (char *)map_lookup_elem(&string_maps_heap, &zero);
 	zero_heap = (char *)map_lookup_elem(&heap_ro_zero, &zero);
 	if (!heap || !zero_heap)

@@ -43,6 +43,7 @@ func overrideMethodParse(s string) OverrideMethod {
 type specOptions struct {
 	DisableKprobeMulti bool
 	DisableUprobeMulti bool
+	ForEachWorkload    bool
 	OverrideMethod     OverrideMethod
 	policyMode         policyconf.Mode
 }
@@ -54,6 +55,7 @@ type opt struct {
 func newDefaultSpecOptions() *specOptions {
 	return &specOptions{
 		DisableKprobeMulti: false,
+		ForEachWorkload:    false,
 		OverrideMethod:     OverrideMethodDefault,
 	}
 }
@@ -90,6 +92,12 @@ var opts = map[string]opt{
 			}
 			options.policyMode = mode
 			return nil
+		},
+	},
+	option.KeyForEachWorkload: {
+		set: func(str string, options *specOptions) (err error) {
+			options.ForEachWorkload, err = strconv.ParseBool(str)
+			return err
 		},
 	},
 }

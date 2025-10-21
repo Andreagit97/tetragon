@@ -117,6 +117,26 @@ type TracingPolicySpec struct {
 	Options []OptionSpec `json:"options,omitempty"`
 }
 
+const keyForEachWorkload = "for-each-workload"
+
+func (tp *TracingPolicySpec) IsForEachWorkloadSkeleton() bool {
+	for _, opt := range tp.Options {
+		if opt.Name == keyForEachWorkload && opt.Value == "1" {
+			return true
+		}
+	}
+	return false
+}
+
+func (tp *TracingPolicySpec) IsForEachWorkloadValues() bool {
+	for _, opt := range tp.Options {
+		if opt.Name == keyForEachWorkload && opt.Value != "1" {
+			return true
+		}
+	}
+	return false
+}
+
 func (tp *TracingPolicy) TpName() string {
 	return tp.ObjectMeta.Name
 }
