@@ -124,6 +124,71 @@ func selectorsMaploads(ks *selectors.KernelSelectorState, index uint32) []*progr
 			},
 		}...)
 	}
+
+	// todo!: we probably need patch here for kernels <5.9
+	//
+	// today we need both probably we can avoid one of them with const variables
+	// maps = append(maps, []*program.MapLoad{{
+	// 	Name: "cg_str_maps_0",
+	// 	Load: func(_ *ebpf.Map, _ string) error {
+	// 		return populateForEachCgroupDummyInit()
+	// 	},
+	// }, {
+	// 	Name: "cg_str_maps_1",
+	// 	Load: func(_ *ebpf.Map, _ string) error {
+	// 		return populateForEachCgroupDummyInit()
+	// 	},
+	// }, {
+	// 	Name: "cg_str_maps_2",
+	// 	Load: func(_ *ebpf.Map, _ string) error {
+	// 		return populateForEachCgroupDummyInit()
+	// 	},
+	// }, {
+	// 	Name: "cg_str_maps_3",
+	// 	Load: func(_ *ebpf.Map, _ string) error {
+	// 		return populateForEachCgroupDummyInit()
+	// 	},
+	// }, {
+	// 	Name: "cg_str_maps_4",
+	// 	Load: func(_ *ebpf.Map, _ string) error {
+	// 		return populateForEachCgroupDummyInit()
+	// 	},
+	// }, {
+	// 	Name: "cg_str_maps_5",
+	// 	Load: func(_ *ebpf.Map, _ string) error {
+	// 		return populateForEachCgroupDummyInit()
+	// 	},
+	// }, {
+	// 	Name: "cg_str_maps_6",
+	// 	Load: func(_ *ebpf.Map, _ string) error {
+	// 		return populateForEachCgroupDummyInit()
+	// 	},
+	// }, {
+	// 	Name: "cg_str_maps_7",
+	// 	Load: func(_ *ebpf.Map, _ string) error {
+	// 		return populateForEachCgroupDummyInit()
+	// 	},
+	// }}...)
+	// if kernels.MinKernelVersion("5.11") {
+	// 	maps = append(maps, []*program.MapLoad{
+	// 		{
+	// 			Name: "cg_str_maps_8",
+	// 			Load: func(_ *ebpf.Map, _ string) error {
+	// 				return populateForEachCgroupDummyInit()
+	// 			},
+	// 		}, {
+	// 			Name: "cg_str_maps_9",
+	// 			Load: func(_ *ebpf.Map, _ string) error {
+	// 				return populateForEachCgroupDummyInit()
+	// 			},
+	// 		}, {
+	// 			Name: "cg_str_maps_10",
+	// 			Load: func(_ *ebpf.Map, _ string) error {
+	// 				return populateForEachCgroupDummyInit()
+	// 			},
+	// 		},
+	// 	}...)
+	// }
 	return maps
 }
 
@@ -305,6 +370,61 @@ func populateAddr6FilterMap(
 
 	return nil
 }
+
+// todo!: remove this one
+// func populateForEachCgroupTest(
+// 	pinPathPrefix string,
+// 	outerMap *ebpf.Map,
+// 	subMap int,
+// ) error {
+
+// 	// INNER MAP 1
+// 	mapKeySize := selectors.StringMapsSizes[subMap]
+// 	if subMap == 7 && !kernels.MinKernelVersion("5.11") {
+// 		mapKeySize = selectors.StringMapSize7a
+// 	}
+// 	innerName := fmt.Sprintf("cg_str_maps_%d_1dummy", subMap)
+// 	innerSpec := &ebpf.MapSpec{
+// 		Name:      innerName,
+// 		Type:      ebpf.Hash,
+// 		KeySize:   uint32(mapKeySize),
+// 		ValueSize: uint32(1),
+// 		// Flags:      uint32(bpf.BPF_F_NO_PREALLOC),
+// 		MaxEntries: uint32(20),
+// 	}
+// 	innerMap, err := ebpf.NewMapWithOptions(innerSpec, ebpf.MapOptions{
+// 		PinPath: sensors.PathJoin(pinPathPrefix, innerName),
+// 	})
+// 	if err != nil {
+// 		return fmt.Errorf("creating innerMap %s failed: %w", innerName, err)
+// 	}
+// 	defer innerMap.Close()
+// 	if err := outerMap.Update(uint64(0), uint32(innerMap.FD()), 0); err != nil {
+// 		return fmt.Errorf("failed to insert %s: %w", innerName, err)
+// 	}
+
+// 	// INNER MAP 2
+// 	innerName2 := fmt.Sprintf("cg_str_maps_%d_2dummy", subMap)
+// 	innerSpec2 := &ebpf.MapSpec{
+// 		Name:      innerName2,
+// 		Type:      ebpf.Hash,
+// 		KeySize:   uint32(mapKeySize),
+// 		ValueSize: uint32(1),
+// 		// Flags:      uint32(bpf.BPF_F_NO_PREALLOC),
+// 		MaxEntries: uint32(10), // different number of entries
+// 	}
+// 	innerMap2, err := ebpf.NewMapWithOptions(innerSpec2, ebpf.MapOptions{
+// 		PinPath: sensors.PathJoin(pinPathPrefix, innerName2),
+// 	})
+// 	if err != nil {
+// 		return fmt.Errorf("creating innerMap2 %s failed: %w", innerName2, err)
+// 	}
+// 	defer innerMap2.Close()
+// 	if err := outerMap.Update(uint64(1), uint32(innerMap2.FD()), 0); err != nil {
+// 		return fmt.Errorf("failed to insert %s: %w", innerName2, err)
+// 	}
+// 	return nil
+// }
 
 func populateStringFilterMaps(
 	k *selectors.KernelSelectorState,

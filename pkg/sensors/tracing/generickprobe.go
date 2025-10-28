@@ -49,6 +49,11 @@ import (
 	gt "github.com/cilium/tetragon/pkg/generictypes"
 )
 
+const (
+	// seems a reasonable default for now
+	cgroupMapsMaxEntries = 200
+)
+
 type observerKprobeSensor struct {
 	name string
 }
@@ -120,6 +125,8 @@ type genericKprobe struct {
 	// ont global instance when we use kprobe multi
 	data *genericKprobeData
 
+	// this is in the future could
+	bindings *program.Map
 	// Does this kprobe is using stacktraces? Note that as specified in the
 	// above data field comment, the map is global for multikprobe and unique
 	// for each kprobe when using single kprobes.
@@ -224,6 +231,19 @@ func filterMaps(load *program.Program, kprobeEntry *genericKprobe) []*program.Ma
 			stringFilterMap[stringMapIndex].SetInnerMaxEntries(maxEntries)
 		}
 		maps = append(maps, stringFilterMap[stringMapIndex])
+	}
+
+	// cgroup maps
+	for stringMapIndex := range numSubMaps {
+		cgroupMap := program.MapBuilderProgram(fmt.Sprintf("cg_str_maps_%d", stringMapIndex), load)
+		if !kernels.MinKernelVersion("5.9") {
+			// Versions before 5.9 do not allow inner maps to have different sizes.
+			// See: https://lore.kernel.org/bpf/20200828011800.1970018-1-kafai@fb.com/
+			//
+			// In this case we put a fixed size for internal maps and we will use BPF_F_NO_PREALLOC when we create them.
+			cgroupMap.SetInnerMaxEntries(cgroupMapsMaxEntries)
+		}
+		maps = append(maps, cgroupMap)
 	}
 
 	stringPrefixFilterMaps := program.MapBuilderProgram("string_prefix_maps", load)
@@ -596,6 +616,24 @@ func hasMapsSetup(spec *v1alpha1.TracingPolicySpec) hasMaps {
 	return has
 }
 
+func GetForEachCgroupArgType(ids []idtable.EntryID) (uint32, error) {
+	ty := uint32(0)
+	for _, id := range ids {
+		gk, err := genericKprobeTableGet(id)
+		if err != nil {
+			return 0, err
+		}
+		if !gk.loadArgs.selectors.entry.HasForEachCgroup() {
+			continue
+		}
+		if ty != 0 {
+			return 0, fmt.Errorf("found multiple kprobes with forEachCgroup filter")
+		}
+		ty = gk.loadArgs.selectors.entry.GetForEachCgroupArgType()
+	}
+	return ty, nil
+}
+
 func createGenericKprobeSensor(
 	spec *v1alpha1.TracingPolicySpec,
 	name string,
@@ -675,7 +713,13 @@ func createGenericKprobeSensor(
 		maps = append(maps, program.MapUserFrom(base.RingBufEvents))
 	}
 
-	return &sensors.Sensor{
+	// if we don't have forEachCgroupFilters, return nil
+	argType, err := GetForEachCgroupArgType(ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get forEachCgroup filter: %w", err)
+	}
+
+	sensor := &sensors.Sensor{
 		Name:      name,
 		Progs:     progs,
 		Maps:      maps,
@@ -702,7 +746,34 @@ func createGenericKprobeSensor(
 			}
 			return errs
 		},
-	}, nil
+	}
+
+	// todo!: extend the support to tracepoints, uprobes, etc...
+	if argType != 0 {
+		sensor.ForEachCgroupState = &sensors.ForEachCgroupState{
+			ArgType: argType,
+		}
+
+		// todo!: check if we already have the maps here.
+		for i := range sensor.Maps {
+			if strings.HasPrefix(sensor.Maps[i].Name, "cg_to_policy_map") {
+				sensor.ForEachCgroupState.WorkloadMap = sensor.Maps[i].MapHandle
+			}
+
+			if strings.HasPrefix(sensor.Maps[i].Name, "cg_str_maps_") {
+				sensor.ForEachCgroupState.CgroupMaps = append(sensor.ForEachCgroupState.CgroupMaps, sensor.Maps[i].MapHandle)
+			}
+		}
+
+		if sensor.ForEachCgroupState.WorkloadMap == nil {
+			return nil, errors.New("forEachCgroup filter enabled but workload map not found in sensor maps")
+		}
+
+		if len(sensor.ForEachCgroupState.CgroupMaps) == 0 {
+			return nil, errors.New("forEachCgroup filter enabled but cgroup maps not found in sensor maps")
+		}
+	}
+	return sensor, nil
 }
 
 func initEventConfig() *api.EventConfig {
@@ -1001,6 +1072,8 @@ func createKprobeSensorFromEntry(polInfo *policyInfo, kprobeEntry *genericKprobe
 	}
 	progs = append(progs, load)
 
+	// initialize map users
+
 	fdinstall := program.MapBuilderSensor("fdinstall_map", load)
 	if has.fdInstall {
 		fdinstall.SetMaxEntries(fdInstallMapMaxEntries)
@@ -1151,6 +1224,8 @@ func createSingleKprobeSensor(polInfo *policyInfo, ids []idtable.EntryID, has ha
 		has.override = gk.hasOverride
 
 		progs, maps = createKprobeSensorFromEntry(polInfo, gk, progs, maps, has)
+
+		// todo!: we need to get the binding maps from here because maps are specific to the single kprobe.
 	}
 
 	return progs, maps, nil

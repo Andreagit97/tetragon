@@ -691,14 +691,54 @@ FUNC_INLINE void *get_string_map(int index, __u32 map_idx)
 	return 0;
 }
 
+FUNC_INLINE void *get_for_each_cgroup_string_map(int index, __u32* map_idx)
+{
+	switch (index) {
+	case 0:
+		return map_lookup_elem(&cg_str_maps_0, map_idx);
+	case 1:
+		return map_lookup_elem(&cg_str_maps_1, map_idx);
+	case 2:
+		return map_lookup_elem(&cg_str_maps_2, map_idx);
+	case 3:
+		return map_lookup_elem(&cg_str_maps_3, map_idx);
+	case 4:
+		return map_lookup_elem(&cg_str_maps_4, map_idx);
+	case 5:
+		return map_lookup_elem(&cg_str_maps_5, map_idx);
+#ifdef __LARGE_BPF_PROG
+	case 6:
+		return map_lookup_elem(&cg_str_maps_6, map_idx);
+	case 7:
+		return map_lookup_elem(&cg_str_maps_7, map_idx);
+#ifdef __V511_BPF_PROG
+	case 8:
+		return map_lookup_elem(&cg_str_maps_8, map_idx);
+	case 9:
+		return map_lookup_elem(&cg_str_maps_9, map_idx);
+	case 10:
+		return map_lookup_elem(&cg_str_maps_10, map_idx);
+#endif
+#endif
+	}
+	return 0;
+}
+
+// This the value that `filter->vallen` will have when the filter doesn't use 
+// static values but dynamic ones. 8 because it is the number of bytes required
+// to skip the the filter header.
+// [index:u32]
+// [op:u32]
+// [section_len:u32] -> 4 bytes
+// [type:u32]        -> 4 bytes
+// so starting after `op` we need to skip 8 bytes to skip the filter header.
+#define HAS_DYNAMIC_VALUES 8
+
 FUNC_LOCAL long
 filter_char_buf_equal(struct selector_arg_filter *filter, char *arg_str, uint orig_len)
 {
-	__u32 *map_ids = (__u32 *)&filter->value;
 	char *heap, *zero_heap;
-	void *string_map;
 	__u16 padded_len;
-	__u32 map_idx;
 	int zero = 0;
 	__u16 len;
 	int index;
@@ -723,9 +763,6 @@ filter_char_buf_equal(struct selector_arg_filter *filter, char *arg_str, uint or
 	// Check if we have entries for this padded length.
 	// Do this before we copy data for efficiency.
 	index = string_map_index(padded_len);
-	map_idx = map_ids[index & 0xf];
-	if (map_idx == 0xffffffff)
-		return 0;
 
 	heap = (char *)map_lookup_elem(&string_maps_heap, &zero);
 	zero_heap = (char *)map_lookup_elem(&heap_ro_zero, &zero);
@@ -769,9 +806,35 @@ filter_char_buf_equal(struct selector_arg_filter *filter, char *arg_str, uint or
 		probe_read(heap + len + 1, (padded_len - len) & STRING_MAPS_COPY_MASK, zero_heap);
 #endif
 	}
+	void *string_map = 0;
+	// todo!: we should optimize it out with a constant 
+	// it means there is no value if the len is 8
+	if (filter->vallen == HAS_DYNAMIC_VALUES) {
+		// this is the for each cgroup case
+		// todo!: could become an helper
+		// todo!: check what returning 0 means here...
+		__u64 cgroupid = tg_get_current_cgroup_id();
+		if (!cgroupid)
+			return 0;
 
-	// Get map for this string length
-	string_map = get_string_map(index, map_idx);
+		__u64 trackerid = cgrp_get_tracker_id(cgroupid);
+		if (trackerid)
+			cgroupid = trackerid;
+
+		__u32 *workload_id = map_lookup_elem(&cg_to_policy_map, &cgroupid);
+		if (!workload_id)
+			return 0;
+
+		string_map = get_for_each_cgroup_string_map(index, workload_id);
+	} else {
+		__u32 *map_ids = (__u32 *)&filter->value;
+		__u32 map_idx = map_ids[index & 0xf];
+		if (map_idx == 0xffffffff)
+			return 0;
+		// Get map for this string length
+		string_map = get_string_map(index, map_idx);
+	}
+
 	if (!string_map)
 		return 0;
 

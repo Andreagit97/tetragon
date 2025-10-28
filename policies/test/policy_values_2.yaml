@@ -1,0 +1,24 @@
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: "tmp-policy-values-2"
+spec:
+  podSelector:
+    matchLabels:
+      app: "my-deployment-2"
+  kprobes:
+  - call: "security_bprm_creds_for_exec"
+    syscall: false
+    args:
+    - index: 0
+      type: "linux_binprm"
+    selectors:
+    - matchArgs:
+      - index: 0
+        operator: "Equal"
+        values:
+        - "/usr/bin/impossible_3"
+        - "/usr/bin/impossible_4"
+  options:
+  - name: refPolicy
+    value: "default/simple-for-each-policy"

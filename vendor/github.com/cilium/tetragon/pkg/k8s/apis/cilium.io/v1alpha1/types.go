@@ -22,6 +22,11 @@ const (
 	PIName = PIPluralName + "." + ciliumio.GroupName
 )
 
+type HookSpec interface {
+	GetSelectors() []KProbeSelector
+	GetArguments() []KProbeArg
+}
+
 type KprobeIgnore struct {
 	// Ignores calls that are not present in the system
 	// +kubebuilder:validation:Optional
@@ -68,6 +73,10 @@ type KProbeSpec struct {
 	// Conditions for ignoring this kprobe
 	Ignore *KprobeIgnore `json:"ignore,omitempty"`
 }
+
+// GetSelectors implements HookSpec for KProbeSpec
+func (s KProbeSpec) GetSelectors() []KProbeSelector { return s.Selectors }
+func (s KProbeSpec) GetArguments() []KProbeArg      { return s.Args }
 
 type KProbeArg struct {
 	// +kubebuilder:validation:Minimum=0
@@ -329,6 +338,10 @@ type TracepointSpec struct {
 	Raw bool `json:"raw,omitempty"`
 }
 
+// GetSelectors implements HookSpec for TracepointSpec
+func (s TracepointSpec) GetSelectors() []KProbeSelector { return s.Selectors }
+func (s TracepointSpec) GetArguments() []KProbeArg      { return s.Args }
+
 type UProbeSpec struct {
 	// Name of the traced binary
 	Path string `json:"path"`
@@ -361,6 +374,10 @@ type UProbeSpec struct {
 	Tags []string `json:"tags,omitempty"`
 }
 
+// GetSelectors implements HookSpec for UProbeSpec
+func (s UProbeSpec) GetSelectors() []KProbeSelector { return s.Selectors }
+func (s UProbeSpec) GetArguments() []KProbeArg      { return s.Args }
+
 type UsdtSpec struct {
 	// Name of the traced binary
 	Path string `json:"path"`
@@ -388,6 +405,10 @@ type UsdtSpec struct {
 	Selectors []KProbeSelector `json:"selectors,omitempty"`
 }
 
+// GetSelectors implements HookSpec for UsdtSpec
+func (s UsdtSpec) GetSelectors() []KProbeSelector { return s.Selectors }
+func (s UsdtSpec) GetArguments() []KProbeArg      { return s.Args }
+
 type LsmHookSpec struct {
 	// Name of the function to apply the kprobe spec to.
 	Hook string `json:"hook"`
@@ -407,6 +428,10 @@ type LsmHookSpec struct {
 	// Maximum of 16 Tags are supported.
 	Tags []string `json:"tags,omitempty"`
 }
+
+// GetSelectors implements HookSpec for LsmHookSpec
+func (s LsmHookSpec) GetSelectors() []KProbeSelector { return s.Selectors }
+func (s LsmHookSpec) GetArguments() []KProbeArg      { return s.Args }
 
 type ListSpec struct {
 	// Name of the list

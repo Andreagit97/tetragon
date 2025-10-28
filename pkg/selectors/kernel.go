@@ -88,6 +88,8 @@ const (
 	ActionRateLimitScopeGlobal
 )
 
+const forEachCgroupSpecialValue = "*"
+
 var actionRateLimitScope = map[string]uint32{
 	"thread":  ActionRateLimitScopeThread,
 	"process": ActionRateLimitScopeProcess,
@@ -703,14 +705,14 @@ func writeMatchValues(k *KernelSelectorState, values []string, ty, op uint32) er
 	return nil
 }
 
-func writeMatchStrings(k *KernelSelectorState, values []string, ty uint32) error {
-	maps := k.createStringMaps()
-
+// todo!: we need to use this to obtain our maps
+func ConvertValuesToMaps(values []string, ty uint32) (SelectorStringMaps, error) {
+	maps := createStringMaps()
 	for _, v := range values {
 		trimNulSuffix := ty == gt.GenericStringType
 		value, size, err := ArgStringSelectorValue(v, trimNulSuffix)
 		if err != nil {
-			return fmt.Errorf("MatchArgs value %s invalid: %w", v, err)
+			return maps, fmt.Errorf("value %s invalid: %w", v, err)
 		}
 		numSubMaps := StringMapsNumSubMaps
 		if !kernels.MinKernelVersion("5.11") {
@@ -728,6 +730,14 @@ func writeMatchStrings(k *KernelSelectorState, values []string, ty uint32) error
 				break
 			}
 		}
+	}
+	return maps, nil
+}
+
+func writeMatchStrings(k *KernelSelectorState, values []string, ty uint32) error {
+	maps, err := ConvertValuesToMaps(values, ty)
+	if err != nil {
+		return err
 	}
 	// write the map ids into the selector
 	mapDetails := k.insertStringMaps(maps)
@@ -882,6 +892,61 @@ func ParseMatchData(k *KernelSelectorState, arg *v1alpha1.ArgSelector, sig []v1a
 	return parseMatchArg(k, arg, sig, ty)
 }
 
+func argumentAndOpForEachCgroupAllowed(op uint32, ty uint32) error {
+	switch op {
+	case SelectorOpEQ, SelectorOpNEQ:
+	default:
+		return fmt.Errorf("operator %s not supported with foreach logic", selectorOpStringTable[op])
+	}
+
+	switch ty {
+	case gt.GenericFdType, gt.GenericFileType, gt.GenericPathType, gt.GenericStringType, gt.GenericCharBuffer, gt.GenericLinuxBinprmType, gt.GenericDataLoc, gt.GenericNetDev:
+	default:
+		return fmt.Errorf("type %s not supported with foreach logic", gt.GenericTypeString(int(ty)))
+	}
+	return nil
+}
+
+func valueIsForEachCgroupSpecialValue(arg *v1alpha1.ArgSelector) bool {
+	if len(arg.Values) != 1 {
+		return false
+	}
+
+	if arg.Values[0] != forEachCgroupSpecialValue {
+		return false
+	}
+	return true
+}
+
+func ArgSelectorHasForEachCgroup(arg *v1alpha1.ArgSelector, sig []v1alpha1.KProbeArg) (bool, uint32, error) {
+	if !valueIsForEachCgroupSpecialValue(arg) {
+		return false, 0, nil
+	}
+
+	// Get the type
+	_, ty, err := dataIndexType(arg, sig)
+	if err != nil {
+		return false, 0, err
+	}
+
+	// Get the operator
+	op, err := SelectorOp(arg.Operator)
+	if err != nil {
+		return false, 0, fmt.Errorf("matcharg error: %w", err)
+	}
+	err = checkOp(op)
+	if err != nil {
+		return false, 0, fmt.Errorf("matcharg error: %w", err)
+	}
+
+	err = argumentAndOpForEachCgroupAllowed(op, ty)
+	if err != nil {
+		return false, 0, err
+	}
+
+	return true, ty, nil
+}
+
 func parseMatchArg(k *KernelSelectorState, arg *v1alpha1.ArgSelector, sig []v1alpha1.KProbeArg, ty uint32) error {
 	op, err := SelectorOp(arg.Operator)
 	if err != nil {
@@ -894,6 +959,20 @@ func parseMatchArg(k *KernelSelectorState, arg *v1alpha1.ArgSelector, sig []v1al
 	WriteSelectorUint32(&k.data, op)
 	moff := AdvanceSelectorLength(&k.data)
 	WriteSelectorUint32(&k.data, ty)
+
+	// Check if the value is a foreach cgroup special case
+	if valueIsForEachCgroupSpecialValue(arg) {
+		// we don't populate the selector in case of foreach cgroup, as values will be populated at runtime
+		// the selector length is always 8 in this case (selector_len + type)
+		WriteSelectorLength(&k.data, moff)
+		// 0 today is not a valid forEachCgroupArgType, so we can use it to check if it's already set
+		if k.forEachCgroupArgType != 0 {
+			return errors.New("only one foreach arg is allowed for a kernel state")
+		}
+		k.forEachCgroupArgType = ty
+		return nil
+	}
+
 	switch op {
 	case SelectorOpInRange, SelectorOpNotInRange:
 		err := writeMatchValuesRange(k, arg.Values, ty)

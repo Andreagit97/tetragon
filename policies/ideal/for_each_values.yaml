@@ -1,0 +1,20 @@
+apiVersion: cilium.io/v1alpha1
+kind: ForEachTracingPolicyValues
+metadata:
+  name: "block-not-allowed-process-my-deployment-1" 
+spec:
+  refPolicy: "block-not-allowed-process" 
+  selector:
+    matchLabels:
+      app: "my-deployment-1"
+  forEachValues:
+  # we need to specify the name of the call since we can have multiple calls with the foreach values. Even if it is strange
+  - call: "security_bprm_creds_for_exec"
+    values: 
+      - "/usr/bin/sleep"
+      - "/usr/bin/cat"
+      - "/usr/bin/my-server-1"
+  - call: "security_file_permission"
+    values: 
+      - "/etc/myconfig.conf"
+      - "/var/log/myapp.log"

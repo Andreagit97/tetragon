@@ -207,6 +207,52 @@ struct {
 } string_maps_10 SEC(".maps");
 #endif
 
+#define CGROUP_MAPS_OUTER_MAX_ENTRIES 32768
+// - for kernels >= 5.9 each inner map will have its own max_entries
+// - for kernels < 5.9 we will patch with a fixed dimension in userspace
+#define CGROUP_MAPS_INNER_MAX_ENTRIES 1
+
+#define DEFINE_CGROUP_HASH_OF_MAPS(N)                                               \
+	struct {                                                                    \
+		__uint(type, BPF_MAP_TYPE_HASH_OF_MAPS);                            \
+		__uint(max_entries, CGROUP_MAPS_OUTER_MAX_ENTRIES);                 \
+		__uint(map_flags, BPF_F_NO_PREALLOC);                               \
+		__type(key, __u64);                                                 \
+		__array(                                                            \
+			values, struct {                                            \
+				__uint(type, BPF_MAP_TYPE_HASH);                    \
+				__uint(max_entries, CGROUP_MAPS_INNER_MAX_ENTRIES); \
+				__type(key, __u8[STRING_MAPS_SIZE_##N]);            \
+				__type(value, __u8);                                \
+			});                                                         \
+	} cg_str_maps_##N SEC(".maps");
+
+DEFINE_CGROUP_HASH_OF_MAPS(0)
+DEFINE_CGROUP_HASH_OF_MAPS(1)
+DEFINE_CGROUP_HASH_OF_MAPS(2)
+DEFINE_CGROUP_HASH_OF_MAPS(3)
+DEFINE_CGROUP_HASH_OF_MAPS(4)
+DEFINE_CGROUP_HASH_OF_MAPS(5)
+DEFINE_CGROUP_HASH_OF_MAPS(6)
+DEFINE_CGROUP_HASH_OF_MAPS(7)
+
+#ifdef __V511_BPF_PROG
+DEFINE_CGROUP_HASH_OF_MAPS(8)
+DEFINE_CGROUP_HASH_OF_MAPS(9)
+DEFINE_CGROUP_HASH_OF_MAPS(10)
+#endif
+
+/* Map to convert cgroup IDs to policy IDs */
+#define MAX_CGROUPS_PER_NODE 32768
+
+struct {
+	__uint(type, BPF_MAP_TYPE_HASH);
+	__uint(max_entries, MAX_CGROUPS_PER_NODE);
+	__uint(map_flags, BPF_F_NO_PREALLOC); 
+	__type(key, __u64); /* Key is the cgrpid */
+	__type(value, __u32); /* Value is the policy id */
+} cg_to_policy_map SEC(".maps");
+
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
 	__uint(max_entries, 1);

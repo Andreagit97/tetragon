@@ -129,6 +129,8 @@ type KernelSelectorState struct {
 	isUprobe bool
 
 	regs []processapi.RegAssignment
+
+	forEachCgroupArgType uint32
 }
 
 func NewKernelSelectorState(listReader ValueReader, maps *KernelSelectorMaps, isUprobe bool) *KernelSelectorState {
@@ -171,6 +173,14 @@ func (k *KernelSelectorState) MatchBinariesPathsMaxEntries() int {
 		}
 	}
 	return maxEntries
+}
+
+func (k KernelSelectorState) HasForEachCgroup() bool {
+	return k.forEachCgroupArgType != 0
+}
+
+func (k KernelSelectorState) GetForEachCgroupArgType() uint32 {
+	return k.forEachCgroupArgType
 }
 
 func (k *KernelSelectorState) Buffer() [4096]byte {
@@ -434,7 +444,7 @@ func (k *KernelSelectorState) insertAddr6Map(addr6map map[KernelLPMTrie6]struct{
 	return uint32(mapid)
 }
 
-func (k *KernelSelectorState) createStringMaps() SelectorStringMaps {
+func createStringMaps() SelectorStringMaps {
 	return SelectorStringMaps{
 		{},
 		{},

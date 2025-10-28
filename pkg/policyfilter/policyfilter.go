@@ -9,6 +9,7 @@ import (
 
 	"k8s.io/client-go/tools/cache"
 
+	"github.com/cilium/ebpf"
 	slimv1 "github.com/cilium/tetragon/pkg/k8s/slim/k8s/apis/meta/v1"
 	"github.com/cilium/tetragon/pkg/labels"
 	"github.com/cilium/tetragon/pkg/logger"
@@ -71,19 +72,32 @@ func TestingEnableAndReset(t *testing.T) {
 //   - policies being added and removed
 //   - pod containers being added and deleted.
 type State interface {
-	// AddPolicy adds a policy to the policyfilter state.
+	// AddGenericPolicy adds a policy to the policyfilter state.
 	// This means that:
 	//  - existing containers of pods that match this policy will be added to the policyfilter map (pfMap)
 	//  - from now on, new containers of pods that match this policy will also be added to pfMap
 	// pods are matched with:
-	//  - namespace for namespaced pilicies (if namespace == "", then policy is not namespaced)
+	//  - namespace for namespaced policies (if namespace == "", then policy is not namespaced)
 	//  - label selector
 	//  - container field selector
-	AddPolicy(polID PolicyID, namespace string, podSelector *slimv1.LabelSelector,
+	AddGenericPolicy(polID PolicyID, namespace string, podSelector *slimv1.LabelSelector,
 		containerSelector *slimv1.LabelSelector) error
 
-	// DelPolicy removes a policy from the state
-	DelPolicy(polID PolicyID) error
+	// AddForEachCgroupPolicy adds a for-each-cgroup policy to the state.
+	AddForEachCgroupPolicy(polID PolicyID, refPolID PolicyID, namespace string, podLabelSelector *slimv1.LabelSelector,
+		containerLabelSelector *slimv1.LabelSelector) error
+
+	// DeleteGenericPolicy removes a policy from the state
+	DeleteGenericPolicy(polID PolicyID) error
+
+	// DeleteForEachCgroupPolicy removes a for-each-cgroup policy from the state
+	DeleteForEachCgroupPolicy(polID PolicyID) error
+
+	// AddForEachCgroupTracker adds a for-each-cgroup tracker to the state.
+	AddForEachCgroupTracker(polID PolicyID, workloadMap *ebpf.Map) error
+
+	// DeleteForEachCgroupTracker removes a for-each-cgroup tracker from the state.
+	DeleteForEachCgroupTracker(polID PolicyID) error
 
 	// AddPodContainer informs policyfilter about a new container and its cgroup id in a pod.
 	// The pod might or might not have been encountered before.

@@ -6,11 +6,15 @@ package sensors
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
+	"github.com/cilium/ebpf"
 	"github.com/cilium/tetragon/api/v1/tetragon"
-	slimv1 "github.com/cilium/tetragon/pkg/k8s/slim/k8s/apis/meta/v1"
+	"github.com/cilium/tetragon/pkg/bpf"
+	"github.com/cilium/tetragon/pkg/kernels"
 	"github.com/cilium/tetragon/pkg/policyfilter"
+	"github.com/cilium/tetragon/pkg/selectors"
 	"github.com/cilium/tetragon/pkg/tracingpolicy"
 )
 
@@ -74,38 +78,153 @@ func SensorsFromPolicy(tp tracingpolicy.TracingPolicy, filterID policyfilter.Pol
 //	policyfilter.PolicyID(tpID), nil if filtering is needed and policyfilter has been successfully set up
 //	_, err if an error occurred
 func (h *handler) updatePolicyFilter(tp tracingpolicy.TracingPolicy, tpID uint64) (policyfilter.PolicyID, error) {
-	var namespace string
-	if tpNs, ok := tp.(tracingpolicy.TracingPolicyNamespaced); ok {
-		namespace = tpNs.TpNamespace()
-	}
+	namespace, podSelector, containerSelector := getNamespaceAndSelectors(tp)
 
-	var podSelector *slimv1.LabelSelector
-	if ps := tp.TpSpec().PodSelector; ps != nil {
-		if len(ps.MatchLabels)+len(ps.MatchExpressions) > 0 {
-			podSelector = ps
-		}
-	}
-
-	var containerSelector *slimv1.LabelSelector
-	if ps := tp.TpSpec().ContainerSelector; ps != nil {
-		if len(ps.MatchLabels)+len(ps.MatchExpressions) > 0 {
-			containerSelector = ps
-		}
-	}
-
-	// we do not call AddPolicy unless filtering is actually needed. This
+	// we do not call AddGenericPolicy unless filtering is actually needed. This
 	// means that if policyfilter is disabled
 	// (option.Config.EnablePolicyFilter is false) then loading the policy
 	// will only fail if filtering is required.
 	if namespace == "" && podSelector == nil && containerSelector == nil {
+		// if a ForEachCgroup filter is specified we will return here because we validated the policy ahead of time
 		return policyfilter.NoFilterID, nil
 	}
 
 	filterID := policyfilter.PolicyID(tpID)
-	if err := h.pfState.AddPolicy(filterID, namespace, podSelector, containerSelector); err != nil {
+	if err := h.pfState.AddGenericPolicy(filterID, namespace, podSelector, containerSelector); err != nil {
 		return policyfilter.NoFilterID, err
 	}
 	return filterID, nil
+}
+
+func (h *handler) addForEachCgroupPolicy(col *collection) error {
+	var err error
+	defer func() {
+		if err != nil {
+			col.err = err
+			col.state = LoadErrorState
+		}
+	}()
+
+	_, podSelector, containerSelector := getNamespaceAndSelectors(col.tracingpolicy)
+	if podSelector == nil && containerSelector == nil {
+		return errors.New("we should have at least a pod or container selector for for-each-cgroup-values policies")
+	}
+
+	spec := col.tracingpolicy.TpSpec()
+
+	// Get the referenced policy name
+	// this is in namespace/name format
+	refPolicyName := getRefPolicyFromOptions(spec.Options)
+	parts := strings.Split(refPolicyName, "/")
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid refPolicy format, expected namespace/name got %s", refPolicyName)
+	}
+	namespace := parts[0]
+	name := parts[1]
+
+	// if not namespaced the namespace should be ""
+	ck := collectionKey{name, namespace}
+
+	col, exists := h.collections.c[ck]
+	if !exists {
+		return fmt.Errorf("referenced policy %s does not exist", ck)
+	}
+
+	// todo!: do we really need to be in the enabled state?
+	if col.state != EnabledState {
+		return fmt.Errorf("referenced policy %s is not enabled", ck)
+	}
+
+	if col.forEachCgroupState == nil {
+		return fmt.Errorf("referenced policy %s does not have for-each-cgroup state", ck)
+	}
+
+	// Get values from the policy
+	// comma separated list of values
+	valuesList := getForEachCgroupValuesFromOptions(spec.Options)
+	values := strings.Split(valuesList, ",")
+
+	// Create the workload map before populating the cgroup->policy map
+	// todo!: we probably need a method here...
+	subMaps, err := selectors.ConvertValuesToMaps(values, col.forEachCgroupState.ArgType)
+	if err != nil {
+		return fmt.Errorf("failed to convert values to maps: %w", err)
+	}
+	// allocate a new policy ID for this policy
+	policyID := policyfilter.PolicyID(h.allocPolicyID())
+
+	cgroupMaps := col.forEachCgroupState.CgroupMaps
+	for i := range subMaps {
+		// if the subMap is empty we skip it
+		if len(subMaps[i]) == 0 {
+			continue
+		}
+
+		mapKeySize := selectors.StringMapsSizes[i]
+		if i == 7 && !kernels.MinKernelVersion("5.11") {
+			mapKeySize = selectors.StringMapSize7a
+		}
+
+		name := fmt.Sprintf("work_%d_map_%d", policyID, i)
+		innerSpec := &ebpf.MapSpec{
+			Name:       name,
+			Type:       ebpf.Hash,
+			KeySize:    uint32(mapKeySize),
+			ValueSize:  uint32(1),
+			MaxEntries: uint32(len(subMaps[i])),
+		}
+
+		if !kernels.MinKernelVersion("5.9") {
+			innerSpec.Flags = uint32(bpf.BPF_F_NO_PREALLOC)
+			innerSpec.MaxEntries = uint32(200) // todo!: magic number
+		}
+
+		inner, err := ebpf.NewMap(innerSpec)
+		if err != nil {
+			return fmt.Errorf("failed to create inner_map: %w", err)
+		}
+
+		// todo!: we need to populate the values of the map!
+
+		err = cgroupMaps[i].Update(policyID, uint32(inner.FD()), ebpf.UpdateNoExist)
+		// todo!: we need to retry if the entry exists!
+		inner.Close()
+		if err != nil {
+			return fmt.Errorf("failed to insert inner policy (id=%d) map: %w", policyID, err)
+		}
+	}
+
+	err = h.pfState.AddForEachCgroupPolicy(policyID, policyfilter.PolicyID(col.tracingpolicyID), "", podSelector, containerSelector)
+	if err != nil {
+		// cleanup of the maps
+		for i := range subMaps {
+			err = cgroupMaps[i].Delete(policyID)
+			if err != nil && !errors.Is(err, ebpf.ErrKeyNotExist) {
+				// todo!: we should have a log and continue
+			}
+		}
+		return fmt.Errorf("failed to add for-each-cgroup-values policy to policyfilter: %w", err)
+	}
+	col.state = EnabledState
+	return nil
+}
+
+func (h *handler) addForEachCgroupTracker(col *collection) error {
+	// today validation ensures there is only one sensor with for-each-cgroup
+	for _, s := range col.sensors {
+		col.forEachCgroupState = s.GetForEachCgroupState()
+	}
+
+	// no for-each-cgroup state found, do nothing
+	if col.forEachCgroupState == nil {
+		return nil
+	}
+
+	// we can use the tracingpolicyID as identifier since it is unique in the state
+	if err := h.pfState.AddForEachCgroupTracker(policyfilter.PolicyID(col.tracingpolicyID), col.forEachCgroupState.WorkloadMap); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (h *handler) addTracingPolicy(op *tracingPolicyAdd) error {
@@ -125,6 +244,10 @@ func (h *handler) addTracingPolicy(op *tracingPolicyAdd) error {
 		tracingpolicyID: uint64(tpID),
 	}
 	collections[op.ck] = &col
+
+	if isForEachCgroupValues(op.tp.TpSpec().Options) {
+		return h.addForEachCgroupPolicy(&col)
+	}
 
 	// update policy filter state before loading the sensors of the policy.
 	//
@@ -151,6 +274,14 @@ func (h *handler) addTracingPolicy(op *tracingPolicyAdd) error {
 	}
 	col.sensors = make([]SensorIface, 0, len(sensors))
 	col.sensors = append(col.sensors, sensors...)
+
+	// Here we can get the maps from the sensors
+	if err = h.addForEachCgroupTracker(&col); err != nil {
+		col.err = err
+		col.state = LoadErrorState
+		return err
+	}
+
 	col.state = LoadingState
 
 	// unlock so that policyLister can access the collections (read-only) while we are loading.
@@ -167,6 +298,14 @@ func (h *handler) addTracingPolicy(op *tracingPolicyAdd) error {
 	return nil
 }
 
+func (h *handler) deleteForEachCgroupPolicy(col *collection) error {
+	return nil
+}
+
+func (h *handler) deleteForEachCgroupTracker(col *collection) error {
+	return nil
+}
+
 func (h *handler) deleteTracingPolicy(op *tracingPolicyDelete) error {
 	h.collections.mu.Lock()
 	collections := h.collections.c
@@ -175,6 +314,22 @@ func (h *handler) deleteTracingPolicy(op *tracingPolicyDelete) error {
 		h.collections.mu.Unlock()
 		return fmt.Errorf("tracing policy %s does not exist", op.ck)
 	}
+
+	if col.isForEachGroupTracker() {
+		for _, c := range collections {
+			if c.refPolicyID == col.tracingpolicyID {
+				// todo!: check if there is a better way and check if we need to delete the inner ebpf maps
+				delete(collections, collectionKey{c.name, ""})
+			}
+		}
+		// todo!: we can close the workload and cgroup maps here.
+		h.collections.mu.Unlock()
+
+	}
+
+	if col.isForEachGroupPolicy() {
+	}
+
 	delete(collections, op.ck)
 	// we have removed the collection, so unlock the map so that the lister can quickly view
 	// that the collection is gone
@@ -183,7 +338,7 @@ func (h *handler) deleteTracingPolicy(op *tracingPolicyDelete) error {
 	col.destroy(true)
 
 	filterID := policyfilter.PolicyID(col.policyfilterID)
-	err := h.pfState.DelPolicy(filterID)
+	err := h.pfState.DeleteGenericPolicy(filterID)
 	if err != nil {
 		return fmt.Errorf("failed to remove from policyfilter: %w", err)
 	}

@@ -77,6 +77,8 @@ type collection struct {
 	// state indicates the state of the collection
 	state TracingPolicyState
 
+	forEachCgroupState            *ForEachCgroupState
+	refPolicyID                   uint64
 	warnedOnModeRetrievalFailure  atomic.Bool
 	warnedOnStatsRetrievalFailure atomic.Bool
 }
@@ -91,6 +93,14 @@ func newCollectionMap() *collectionMap {
 	return &collectionMap{
 		c: map[collectionKey]*collection{},
 	}
+}
+
+func (c *collection) isForEachGroupTracker() bool {
+	return c.forEachCgroupState != nil
+}
+
+func (c *collection) isForEachGroupPolicy() bool {
+	return c.refPolicyID != 0
 }
 
 func (c *collection) info() string {

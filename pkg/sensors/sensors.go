@@ -9,6 +9,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/cilium/ebpf"
 	"github.com/cilium/tetragon/pkg/bpf"
 	"github.com/cilium/tetragon/pkg/logger"
 	"github.com/cilium/tetragon/pkg/policyfilter"
@@ -27,6 +28,12 @@ var (
 	// protects allPrograms and allMaps
 	allProgramsAndMapsMutex sync.Mutex
 )
+
+type ForEachCgroupState struct {
+	ArgType     uint32
+	WorkloadMap *ebpf.Map
+	CgroupMaps  []*ebpf.Map
+}
 
 // Sensors
 //
@@ -51,6 +58,8 @@ type Sensor struct {
 	Progs []*program.Program
 	// Maps are all the BPF Maps that the progs use.
 	Maps []*program.Map
+	// ForEachCgroupState contains for each hook (e.g. kernel function name) the `forEachCgroup` filters
+	ForEachCgroupState *ForEachCgroupState
 	// Loaded indicates whether the sensor has been Loaded.
 	Loaded bool
 	// Destroyed indicates whether the sensor had been destroyed.
@@ -112,6 +121,7 @@ type SensorIface interface {
 	// the sensor's programs.
 	TotalMemlock() int
 	Overhead() ([]ProgOverhead, bool)
+	GetForEachCgroupState() *ForEachCgroupState
 }
 
 func (s *Sensor) Overhead() ([]ProgOverhead, bool) {
@@ -141,6 +151,10 @@ func (s *Sensor) Overhead() ([]ProgOverhead, bool) {
 
 func (s *Sensor) GetName() string {
 	return s.Name
+}
+
+func (s *Sensor) GetForEachCgroupState() *ForEachCgroupState {
+	return s.ForEachCgroupState
 }
 
 func (s *Sensor) IsLoaded() bool {

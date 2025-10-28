@@ -1,0 +1,37 @@
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: "block-not-allowed-process" 
+spec:
+  kprobes:
+  - call: "security_bprm_creds_for_exec"
+    syscall: false
+    args:
+    - index: 0
+      type: "linux_binprm"
+    selectors:
+    - matchArgs:
+      - index: 0
+        operator: "Equal"
+        values:
+        - "*"
+  - call: "security_file_permission"
+    syscall: false
+    args:
+    - index: 0
+      type: "file" # (struct file *) used for getting the path
+    - index: 1
+      type: "int" # 0x04 is MAY_READ, 0x02 is MAY_WRITE
+    selectors:
+    - matchArgs:      
+      - index: 0
+        operator: "Equal"
+        values:
+        - "*foreach*"
+      - index: 1
+        operator: "Equal"
+        values:
+        - "2" # MAY_WRITE
+  options:
+  - name: disable-kprobe-multi
+    value: "1"

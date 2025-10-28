@@ -106,6 +106,7 @@ func (h policyHandler) PolicyHandler(
 ) (sensors.SensorIface, error) {
 
 	spec := policy.TpSpec()
+	// todo!: remove validation from here
 	sections := 0
 	if len(spec.KProbes) > 0 {
 		sections++
